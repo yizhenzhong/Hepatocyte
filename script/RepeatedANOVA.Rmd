@@ -1,0 +1,71 @@
+---
+title: "RepeatedAnova"
+author: "Yizhen Zhong"
+date: "February 16, 2018"
+output: html_document
+---
+## Overview
+
+In this script, I will identify genes that shows differential expression in any of the 7 conditions (1 baseline and 6 drug treated conditions) I will perform repeated measurement ANOVA for each gene
+```{r}
+setwd("R:/Basic_Sciences/Pharm/Perera_Lab/Yizhen/Hepatocyte_project/script/")
+
+get_anova_result <- function(x, condition, subject){
+  a = summary(aov(x~condition+Error(subject/condition)))
+  return(unlist(a[[2]]))
+}
+
+```
+
+
+## Merge expression files in each condition and create a sample file (showing the condition and subject)
+
+```{r}
+sample = NULL
+exp = NULL
+for(i in 1:7){
+  fn = paste0("../data/expression/condition",i,"_expression_tmm_normalization.csv")
+  f =  read.csv(fn,stringsAsFactors = F)
+  print(paste(i,"condition, expression dimension:", dim(f)[1],  dim(f)[2],sep=" "))
+  temp = as.data.frame(colnames(f)[-1])
+  temp$condition = i
+  colnames(temp)[1] = "sample"
+  sample = rbind(sample,temp)
+  if(is.null(exp)){exp = f}else{exp = merge(exp,f,by="geneid")}
+}
+```
+
+
+##  perform Repeated ANOVA
+
+```{r}
+
+sample$sample = as.factor(sample$sample)
+sample$condition = as.factor(sample$condition)
+start_time <- Sys.time()
+out = apply(exp[,-1],1,function(x) get_anova_result(as.numeric(x),sample$condition,sample$sample))
+end_time <- Sys.time()
+print(end_time - start_time)
+out = as.data.frame(t(out))
+write.csv(out,"../results/anova_result.csv")
+```
+
+
+## plot the histogram
+
+```{r}
+tiff("../figure/ANOVA_pvalue_allcondition.tiff",height = 17, width = 17, 
+     units = "cm", compression = "lzw", res = 1000)
+ggplot(out,aes(x=-log10(out$`Pr(>F)1`)))+geom_histogram(alpha=0.4,fill="red")+ggtitle("all condition")+theme(plot.title = element_text(hjust = 0.5))+
+ theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+                    panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"),
+                    panel.background = element_blank())+scale_fill_manual(values=c(marker1$color[5],marker1$color[4]))+
+  theme(axis.text = element_text(size=20),axis.title = element_text(size = 25),legend.title = element_blank(),
+        legend.key.size = unit(1.5,'lines'),legend.key.width = unit(3,"cm"),
+        ,legend.text =  element_text(size = 20),legend.position=c(0.75,0.75),legend.box="horizontal",
+        plot.margin = unit(c(1,1,1,1), "cm"),axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)),
+        legend.margin=margin(t=0, r=0, b=0, l=0, unit="cm"),axis.title.x = element_text(margin = margin(t = 20, r = 0, b = 0, l = 0)))+
+  labs(x = paste0("-log10(Repeated ANOVA p-value)"))
+
+dev.off()
+  
