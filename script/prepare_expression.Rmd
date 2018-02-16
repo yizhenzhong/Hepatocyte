@@ -1,0 +1,99 @@
+---
+title: "prepare_expression"
+author: "Yizhen Zhong"
+date: "February 15, 2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## set up environment
+
+```{r}
+setwd("R:/Basic_Sciences/Pharm/Perera_Lab/Yizhen/Hepatocyte_project/script/")
+library(edgeR)
+library(GenABEL)
+inverse_normal<-function(M){
+  #transform column to a standard normal distribution
+  M_norm = apply(M,2,rntransform)
+  return(M_norm)
+}
+
+```
+
+## Read gene position file
+
+```{r}
+gene_pos = read.table("../data/gene_pos_matrix.txt",header = T,stringsAsFactors = F,sep = "\t")
+gene_pos$length = gene_pos$Gene.end..bp.- gene_pos$Gene.start..bp.
+```
+
+## Read gene count file
+
+```{r}
+file = 4
+count = read.table( paste0("../data/liver_RNAseq_count",file,".txt"),sep = "\t",stringsAsFactors = F,header = T)
+count_num = count[-c(1:5),]
+count_num$gene = as.vector(sapply(count_num$gene,function(x) strsplit(x,".",fixed = T)[[1]][1]))
+count_num_match = count_num[match(gene_pos$Gene.stable.ID,count_num$gene),]
+nrow(gene_pos) ==  nrow(count_num_match)
+all(gene_pos$Gene.stable.ID == count_num_match$gene)
+count_sample = sapply(colnames(count_num_match), function(x) strsplit(x,".",fixed = T)[[1]][2])
+count_sample = as.vector(sapply(count_sample, function(x) substr(x, 1, nchar(x)-6)))
+count_sample[2] = "0" #change Sample_MP.*count to Sample_MP.0 to match the name between expression and genotype
+```
+
+## Read sample file
+
+```{r}
+sample = read.table("../data/genotype/baseline.genotype.eqtl.excludeoutlier.header.fam",stringsAsFactors = F,header = F)
+sample_id = as.vector(sapply(sample$V1, function(x) substr(x, 4, nchar(x))))
+sample_index = which(!(is.na(match(sample_id,count_sample))))
+index = match(sample_id,count_sample)[!(is.na(match(sample_id,count_sample)))]
+print(paste0(length(sample_index), " samples in gene expression file with genotype"))
+```
+
+## subset the count file 
+
+```{r}
+count_sub = count_num_match[,index]
+```
+
+## calculate library size
+
+```{r}
+edge_count <- DGEList(counts=count_sub,genes = gene_pos[,])
+edge_count = calcNormFactors(edge_count)
+library_size =  edge_count$samples$lib.size * edge_count$samples$norm.factors
+norm_counts= apply(edge_count$counts,1,function(x) x/library_size*1e6)
+```
+
+## filter genes
+
+```{r}
+tpm <- do.call(cbind, lapply(1:ncol(count_sub), function(i) {
+  rate = log(count_sub[,i]) - log(gene_pos$length)
+  denom = log(sum(exp(rate)))
+  exp(rate - denom + log(1e6))
+}))
+
+
+index1 = apply(tpm,1,function(x) sum(x>0.1) > ncol(tpm)*0.2)
+index2 = as.vector(apply(count_num_match[,-1],1,function(x) sum(x>=6) > ncol(count_num_match)*0.2))
+index = sapply(1:length(index1), function(x) all(index1[x],index2[x]))
+```
+
+#############inverse normal
+
+```{r}
+norm_counts_filter = norm_counts[,index]
+norm_counts_filter_norm = t(inverse_normal(norm_counts_filter))
+colnames(norm_counts_filter_norm) = noquote(sample$V1[sample_index])
+norm_counts_filter_norm = as.data.frame(norm_counts_filter_norm)
+norm_counts_filter_norm = cbind(gene_pos$Gene.stable.ID[index],norm_counts_filter_norm)
+colnames(norm_counts_filter_norm)[1] = "geneid"
+```
+
+#save the table
+```{r}
+write.csv(norm_counts_filter_norm,paste0("../data/expression/condition",file,"_expression_tmm_normalization.csv"),row.names = F)
