@@ -10,11 +10,15 @@ In this script, I will identify genes that shows differential expression in any 
 ```{r}
 setwd("R:/Basic_Sciences/Pharm/Perera_Lab/Yizhen/Hepatocyte_project/script/")
 
-get_anova_result <- function(x, condition, subject){
+get_RManova_result <- function(x, condition, subject){
   a = summary(aov(x~condition+Error(subject/condition)))
   return(unlist(a[[2]]))
 }
 
+get_anova_result <- function(x, condition, subject){
+  a = summary(aov(x~condition+subject))
+  return(unlist(a[[1]]))
+}
 ```
 
 
@@ -24,7 +28,7 @@ get_anova_result <- function(x, condition, subject){
 sample = NULL
 exp = NULL
 for(i in 1:7){
-  fn = paste0("../data/expression/condition",i,"_expression_tmm_normalization.csv")
+  fn = paste0("../data/expression/condition",i,"_expression_tmm_no_inf_normalization.csv")
   f =  read.csv(fn,stringsAsFactors = F)
   print(paste(i,"condition, expression dimension:", dim(f)[1],  dim(f)[2],sep=" "))
   temp = as.data.frame(colnames(f)[-1])
@@ -42,30 +46,72 @@ for(i in 1:7){
 
 sample$sample = as.factor(sample$sample)
 sample$condition = as.factor(sample$condition)
+print(table(sample$sample))
+print(table(sample$condition))
 start_time <- Sys.time()
-out = apply(exp[,-1],1,function(x) get_anova_result(as.numeric(x),sample$condition,sample$sample))
+out = apply(exp[,-1],1,function(x) get_RManova_result(as.numeric(x),sample$condition,sample$sample))
 end_time <- Sys.time()
 print(end_time - start_time)
 out = as.data.frame(t(out))
-write.csv(out,"../results/anova_result.csv")
+out_table = cbind(exp$geneid,out)
+colnames(out_table)[1]="geneid"
+write.csv(out_table,"../results/RManova_result.csv",row.names = F,quote = F)
 ```
+
 
 
 ## plot the histogram
 
 ```{r}
-tiff("../figure/ANOVA_pvalue_allcondition.tiff",height = 17, width = 17, 
+tiff("../figure/RMANOVA_pvalue_allcondition.tiff",height = 17, width = 17, 
      units = "cm", compression = "lzw", res = 1000)
-ggplot(out,aes(x=-log10(out$`Pr(>F)1`)))+geom_histogram(alpha=0.4,fill="red")+ggtitle("all condition")+theme(plot.title = element_text(hjust = 0.5))+
+fig = ggplot(out,aes(x=-log10(out$`Pr(>F)1`)))+geom_histogram(alpha=0.4,fill="red")+ggtitle("all condition")+theme(plot.title = element_text(hjust = 0.5))+
  theme(panel.border = element_blank(), panel.grid.major = element_blank(),
                     panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"),
                     panel.background = element_blank())+scale_fill_manual(values=c(marker1$color[5],marker1$color[4]))+
   theme(axis.text = element_text(size=20),axis.title = element_text(size = 25),legend.title = element_blank(),
         legend.key.size = unit(1.5,'lines'),legend.key.width = unit(3,"cm"),
-        ,legend.text =  element_text(size = 20),legend.position=c(0.75,0.75),legend.box="horizontal",
+        legend.text =  element_text(size = 20),legend.position=c(0.75,0.75),legend.box="horizontal",
         plot.margin = unit(c(1,1,1,1), "cm"),axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)),
         legend.margin=margin(t=0, r=0, b=0, l=0, unit="cm"),axis.title.x = element_text(margin = margin(t = 20, r = 0, b = 0, l = 0)))+
   labs(x = paste0("-log10(Repeated ANOVA p-value)"))
-
+fig
 dev.off()
-  
+
+fig
+```
+
+
+
+
+## perform regular ANOVA
+```{R}
+start_time <- Sys.time()
+out = apply(exp[,-1],1,function(x) get_anova_result(as.numeric(x),sample$condition,sample$sample))
+end_time <- Sys.time()
+print(end_time - start_time)
+out = as.data.frame(t(out))
+out_table = cbind(exp$geneid,out)
+colnames(out_table)[1]="geneid"
+write.csv(out_table,"../results/anova_result.csv",row.names = F,quote = F)
+```
+
+
+```{r}
+tiff("../figure/ANOVA_pvalue_allcondition.tiff",height = 17, width = 17, 
+     units = "cm", compression = "lzw", res = 1000)
+fig = ggplot(out,aes(x=-log10(out$`Pr(>F)1`)))+geom_histogram(alpha=0.4,fill="red")+ggtitle("all condition")+theme(plot.title = element_text(hjust = 0.5))+
+ theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+                    panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"),
+                    panel.background = element_blank())+scale_fill_manual(values=c(marker1$color[5],marker1$color[4]))+
+  theme(axis.text = element_text(size=20),axis.title = element_text(size = 25),legend.title = element_blank(),
+        legend.key.size = unit(1.5,'lines'),legend.key.width = unit(3,"cm"),
+        legend.text =  element_text(size = 20),legend.position=c(0.75,0.75),legend.box="horizontal",
+        plot.margin = unit(c(1,1,1,1), "cm"),axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)),
+        legend.margin=margin(t=0, r=0, b=0, l=0, unit="cm"),axis.title.x = element_text(margin = margin(t = 20, r = 0, b = 0, l = 0)))+
+  labs(x = paste0("-log10(ANOVA p-value)"))
+fig
+dev.off()
+
+fig
+```
