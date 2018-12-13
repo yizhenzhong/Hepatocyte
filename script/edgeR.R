@@ -1,3 +1,9 @@
+
+#--- title: edgeR processing of expression data
+#---author: Yizhen Zhong
+#---date:04122018
+
+
 setwd("/Volumes/fsmresfiles//Basic_Sciences/Pharm/Perera_Lab/Yizhen/Hepatocyte_project/script/")
 setwd("R:/Basic_Sciences/Pharm/Perera_Lab/Yizhen/Hepatocyte_project/script/")
 library(ggplot2)
@@ -8,9 +14,12 @@ library(edgeR)
 library(pheatmap)
 library(limma)
 library(biomaRt)
+library(sva)
 library("BiocParallel")
 drug = c('Baseline', 'Omeprazole','Phenob`arbital','Dexamethasone','Carbamazepin','Phenytoin','Rifampicin')
 condit = paste0("condition",1:7)
+marker1 = list(color =brewer.pal(7,"Dark2"))$color
+colors = marker1[edge_count$samples$condition]
 #register(SnowParam(4))
 #count = read.table("../data/liver_RNAseq_count1.txt",sep = "\t",stringsAsFactors = F,header = T)
 ###
@@ -59,7 +68,7 @@ count_id = sapply(as.character(sample$Hepatocyte),function(x) strsplit(x, ".",fi
 count_id[sample$Hepatocyte=="Sample_MP."] = "0"
 clinic = read.csv("../data/Hepatocytes_clinic_info_all.csv",stringsAsFactors = F)
 clinic_id = sapply(as.character(clinic$ID),function(x) strsplit(x, "-",fixed = T)[[1]][2])
-edge_count$samples =  cbind(edge_count$samples, clinic[match(count_id, clinic_id),2:4])
+edge_count$samples =  cbind(edge_count$samples, clinic[match(count_id, clinic_id),2:ncol(clinic)])
 edge_count = edge_count[,-which(count_id %in% c("38","56","46","73","48","5")),keep.lib.sizes=F] #filter samples
 save(edge_count,file="../results/edgeR_count_filter_429samples.rda")
 #edge_count = get(load(file="../results/edgeR_count_filter_429samples.rda"))
@@ -91,8 +100,7 @@ tmm[["sample"]] = edge_count$samples
 tmm[["gene"]] = edge_count$genes
 save(tmm,file="../results/edgeR_TMM_15575_429.rda")
 
-marker1 = list(color =brewer.pal(7,"Dark2"))$color
-colors = marker1[edge_count$samples$condition]
+
 lcpm = cpm(edge_count,log=T)
 
 pdf("../figure/limma_mds.pdf")
@@ -108,6 +116,8 @@ edge_count$samples$condition = factor(edge_count$samples$condition)
 #save(edge_count,file="../results/edgeR_count_15575_429_TMM.rda")
 edge_count = get(load("../results/edgeR_count_15575_429_TMM.rda"))
 save(edge_count,file="../results/edgeR_count_15575_429_TMM.rda")
+
+
 design = model.matrix(~0+condition+Hepatocyte,data=edge_count$samples)
 contrast = c()
 for(i in 2:7){
@@ -122,13 +132,21 @@ contr.matrix = makeContrasts(contrasts=contrast,
 #######################linear modeling
 v <- voom(edge_count, design, plot = TRUE)
 
-vfit = lmFit(v,design)
+save(v,file="../results/edgeR_count_15575_429_voom_v.rda")
+#pairs(v$targets[,c(6:ncol(v$targets))])
+#remove the batch effect
+mod = model.matrix(~Age+Sex+Platform+condition,data=v$targets)
+v_rmbatch = ComBat(dat=v$E, batch=v$targets$Batch, mod=mod)
+save(v_rmbatch,file="../results/edgeR_count_15575_429_voom_v_rmbatch.rda")
+
+
+vfit = lmFit(v_rmbatch,design)
 vfit2 = contrasts.fit(vfit,contrasts = contr.matrix)
 vfit3 <- eBayes(vfit2)
 
 save(vfit3,file="../results/LIMMA_edgeR_DE_15575_429.rda")
-
-#######################
+save(vfit3,file="../results/LIMMA_edgeR_DE_15575_429_v_rmbatch.rda")
+####################### 
 vdata = voom(edge_count)
 save(vdata,file="../results/LIMMA_edgeR_voom_norm_15575_429.rda")
 
