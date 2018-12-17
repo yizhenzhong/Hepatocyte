@@ -2,6 +2,10 @@
 setwd("R:/Basic_Sciences/Pharm/Perera_Lab/Yizhen/Hepatocyte_project/script/")
 #save(vdata,file="../results/LIMMA_edgeR_voom_norm_15575_429.rda")
 library(variancePartition)
+library('doParallel')
+library(ggrepel)
+source("../Yilin/script/Baseline/helper.R")
+
 #The variancePartition package implements a
 #statistical method to quantify the contribution of multiple sources of variation
 #and decouple within/between-individual variation.
@@ -14,56 +18,63 @@ vdata = get(load("../results/edgeR_count_15579_429_voom_v.rda"))
 #with limma/voom [6] to model the precision of each observation
 #or DESeq2 [7].
 
-#vdata_rm = get(load("../results/edgeR_count_15575_429_voom_v_rmbatch.rda"))
-#vdata$targets$cell = as.numeric(vdata$targets$Hepatocyte)
-#vdata$targets$drug = as.numeric(vdata$targets$condition)
-#write.csv(vdata$targets[,5:ncol(vdata$targets)],"../r  esults/LIMMA_edgeR_voom_norm_15575_429_cov.csv",quote = F)
 
-cols1 <- c(rev(RColorBrewer::brewer.pal(9, "Set1")))
 
-form <- ~ (1|Hepatocyte) + (1|condition) + Age + Sex + Ancestry + Platform + Batch
+cl <- makeCluster(4)
+registerDoParallel(cl)
+vdata$targets$Sex = factor(vdata$targets$Sex)
+vdata$targets$Platform = factor(vdata$targets$Platform)
+vdata$targets$Batch = factor(vdata$targets$Batch)
 
-varPart <- fitExtractVarPartModel(vdata, form, vdata$targets)
-save(varPart,file="../results/variancePartition_15575_429samples.rda")
-save(varPart,file="../results/variancePartition_15575_429samples_rmbatch.rda")
+form <- ~ (1|Hepatocyte) + (1|condition) + Age + (1|Sex) + Ancestry + (1|Platform) + (1|Batch)
+#Categorical variables should (almost) always be modeled as a random effect.
+#The difference between modeling a categorical variable as a fixed versus random
+#effect is minimal when the sample size is large compared to the number of
+#categories (i.e. levels). So variables like disease status, sex or time point will
+#not be sensitive to modeling as a fixed versus random effect. However, variables
+#with many categories like Individual must be modeled as a random effect in
+#order to obtain statistically valid results. So to be on the safe side, categorical
+#variable should be modeled as a random effect.
 
-varPart = get(load("../results/variancePartition_15575_429samples_rmbatch.rda"))
+varPart <- fitExtractVarPartModel(vdata$E, form, vdata$targets)
+vp <- sortCols( varPart )
 
+plotVarPart( vp)+ 
+  theme_hepa()+
+  theme(axis.text.x = element_text(angle = 30, hjust = 1),
+        legend.position = "None")
+ggsave("../figure/variancePartition.png")
+
+save(varPart,file="../results/variancePartition_15579_429samples.rda")
+
+
+###################
 table = cbind(vdata$genes, varPart$condition,varPart$Hepatocyte,varPart$Age, varPart$Sex, varPart$Ancestry)
-
-colnames(table)[(ncol(table)-4): ncol(table)] = c("drug","cell","age","sex","Ancestry")
+colnames(table)[(ncol(table)-4): ncol(table)] = c("drug","hepatocyte","age","sex","Ancestry")
 
 table = as.data.frame(table)
 table$drug =  as.numeric(as.character(table$drug))
-table$cell =  as.numeric(as.character(table$cell))
+table$hepatocyte =  as.numeric(as.character(table$hepatocyte))
+table = table[order(table$drug, decreasing = T),]
+#write.table(table, "../results/variancePartition_Summary_table_15579.txt", quote = F, row.names = F, sep = "\t")
 
-write.table(table, "../results/variancePartition_Summary_table.txt", quote = F, row.names = F, sep = "\t")
-pdf("../figure/variancePartition_rmbatch.pdf")
+cols1 <- c(rev(RColorBrewer::brewer.pal(8, "Dark2")))
+ggplot(table,aes(x=hepatocyte,y=drug,color=Gene.type)) + 
+  geom_point(size=2) +
+  theme_hepa()+  
+  scale_color_manual(values=c(cols1[7],cols1[8]))+
+  labs(y="variance across drug treatments")+
+  labs(x="variance across hepatocytes")+
+  theme(legend.position = c(0.75, 0.8),
+        legend.text=element_text(size=18))+
+  geom_text_repel(data=head(table, 20), aes(label=HGNC.symbol))
 
-
-table$Gene.type[grep("^CYP",table$HGNC.symbol)] = "DME"
-    
-ggplot(table,aes(x=cell,y=drug,color=Gene.type)) + geom_point() +
-  theme(plot.title = element_text(hjust = 0.5))+
-  theme(panel.border = element_blank(), panel.grid.major = element_blank(),axis.title.x=element_blank(),
-        panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"),
-        panel.background = element_blank())+
-  theme(axis.text = element_text(size=20),axis.title = element_text(size = 25),legend.title = element_blank(),
-        legend.key.size = unit(1.5,'lines'),legend.key.width = unit(3,"cm"),legend.background=element_blank(),
-        legend.key=element_blank(),
-        legend.text =  element_text(size = 20),legend.position=c(0.75,0.75),legend.box="horizontal",
-        plot.margin = unit(c(1,1,1,1), "cm"),axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)),
-        legend.margin=margin(t=0, r=0, b=0, l=0, unit="cm"),axis.title.x = element_text(margin = margin(t = 20, r = 0, b = 0, l = 0)))+
-  scale_color_manual(values=c(cols1[3],cols1[1], cols1[2]))+labs(y="condition variance")+labs(x="cell variance")
-
-
-dev.off()
-
+ggsave("../figure/variacne_partition.png")
 
 ############################
 library(gProfileR)
-var = read.table("../results/variancePartition_Summary_table.txt", header = T, stringsAsFactors = F,
-                 sep = "\t")
+#var = read.table("../results/variancePartition_Summary_table.txt", header = T, stringsAsFactors = F,
+
 var = var[order(var$cell, decreasing = T),]
 hist(var$cell)
 go_ana = gprofiler(var$HGNC.symbol[var$cell>0.9],ordered_query = T, 
